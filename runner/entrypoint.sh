@@ -5,7 +5,7 @@ set -eu
 
 : "${REPO:?set REPO=owner/name (or ORG=name for an org-level runner)}"
 : "${APP_ID:?set APP_ID}"
-: "${APP_PRIVATE_KEY_PATH:=/run/secrets/app-private-key.pem}"
+export APP_PRIVATE_KEY_PATH="${APP_PRIVATE_KEY_PATH:-/run/secrets/app-private-key.pem}"
 : "${HOST_AGENT_DATA:?set HOST_AGENT_DATA to the agent-data path on the Docker host}"
 : "${RUNNER_NAME:=epicteto-$(hostname)}"
 : "${AGENT_IMAGE:=epicteto-agent:local}"
