@@ -1,5 +1,5 @@
 {
-  "name": "agent-runner",
+  "name": "epicteto",
   "private": true,
   "type": "module",
   "scripts": { "typecheck": "tsc -p tsconfig.json" },
