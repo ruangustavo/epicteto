@@ -19,7 +19,7 @@ export async function ensureBareRepo(cfg: RunConfig, bareRepo: string): Promise<
   if (!existsSync(bareRepo)) {
     await $`git clone --bare --quiet ${remoteUrl(cfg)} ${bareRepo}`.quiet();
   }
-  const refspec = "+refs/heads/*:refs/heads/*";
+  const refspec = "+refs/heads/main:refs/heads/main";
   await $`git -C ${bareRepo} fetch --quiet --prune ${remoteUrl(cfg)} ${refspec}`.quiet();
 }
 
