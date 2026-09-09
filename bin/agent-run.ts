@@ -24,14 +24,15 @@ async function finish(phase: string, label: string, extra: { prUrl?: string; det
   await gh.setLabels(cfg, [label], [RUNNING, ...TERMINAL.filter((l) => l !== label)]);
 }
 
-process.on("unhandledRejection", async (err) => {
-  const message = err instanceof Error ? `${err.message}\n${(err as { stderr?: Buffer }).stderr?.toString() ?? ""}` : String(err);
+async function reportFatal(err: unknown): Promise<never> {
+  const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
+  const message = err instanceof Error ? `${err.message}\n${stderr}` : String(err);
   log(`fatal: ${message}`);
   await finish("failed: orchestrator error", "agent:needs-input", {
     detail: `<details><summary>error</summary>\n\n\`\`\`\n${message.slice(-3000)}\n\`\`\`\n</details>`,
   }).catch(() => {});
   process.exit(1);
-});
+}
 
 function agentOutputDetails(output: string): string {
   return `<details><summary>agent output</summary>\n\n\`\`\`\n${output.slice(-3000)}\n\`\`\`\n</details>`;
@@ -144,8 +145,12 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
     : finish("needs input: checks failed after review round", "agent:needs-input", { prUrl });
 }
 
-if (cfg.mode.kind === "review") {
-  await reviewRound(cfg, cfg.mode.prNumber, cfg.mode.reviewBody);
-} else {
-  await implement(cfg);
+try {
+  if (cfg.mode.kind === "review") {
+    await reviewRound(cfg, cfg.mode.prNumber, cfg.mode.reviewBody);
+  } else {
+    await implement(cfg);
+  }
+} catch (err) {
+  await reportFatal(err);
 }
