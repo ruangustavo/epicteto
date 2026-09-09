@@ -85,7 +85,7 @@ export async function renderReviewPrompt(
     .join("\n\n");
   const rebase =
     opts.conflicts.length > 0
-      ? `# Rebase conflicts\n\nThe branch could not be rebased on \`main\`. Run \`git rebase main\`, resolve conflicts in these files first, then continue:\n${opts.conflicts.map((f) => `- ${f}`).join("\n")}`
+      ? `# Rebase conflicts\n\nThe branch could not be rebased on the base branch. Run \`git rebase ${cfg.baseBranch}\`, resolve conflicts in these files first, then continue:\n${opts.conflicts.map((f) => `- ${f}`).join("\n")}`
       : "";
   return template
     .replace("{{pr}}", String(opts.pr.number))

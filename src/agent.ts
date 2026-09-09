@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import type { RunConfig } from "./config";
+import { hostPath, type RunConfig } from "./config";
 import type { Issue, IssueComment } from "./github";
 
 export interface ContainerMounts {
@@ -40,9 +40,10 @@ function dockerRun(cfg: RunConfig, mounts: ContainerMounts, extraEnv: Record<str
     ...extraEnv,
   }).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   const network = mounts.network ? ["--network", mounts.network] : [];
+  const h = (p: string) => hostPath(cfg, p);
   return $`docker run --rm ${env} ${network} \
-    -v ${mounts.worktree}:/work -v ${mounts.bareRepo}:${mounts.bareRepo} \
-    -v ${mounts.state}:/state -v ${mounts.piHome}:/root/.pi/agent \
+    -v ${h(mounts.worktree)}:/work -v ${h(mounts.bareRepo)}:${mounts.bareRepo} \
+    -v ${h(mounts.state)}:/state -v ${h(mounts.piHome)}:/root/.pi/agent \
     -w /work ${cfg.image} ${command}`;
 }
 
@@ -76,21 +77,26 @@ export interface CheckResult {
   output: string;
 }
 
-const CHECKS = ["typecheck", "lint", "test", "build"] as const;
-
-export async function runChecks(cfg: RunConfig, mounts: ContainerMounts, only: readonly string[] = CHECKS): Promise<CheckResult[]> {
+/**
+ * Runs cfg.checks in order, stopping at the first failure. The first command is setup and always runs.
+ * `only` restricts the run to setup plus the named commands (used for the baseline on the base branch).
+ */
+export async function runChecks(cfg: RunConfig, mounts: ContainerMounts, only?: readonly string[]): Promise<CheckResult[]> {
+  const [setup, ...rest] = cfg.checks;
   const results: CheckResult[] = [];
-  const install = await dockerRun(cfg, mounts, {}, ["bun", "install"]).nothrow();
-  if (install.exitCode !== 0) {
-    return [{ name: "install", ok: false, output: install.stdout.toString() + install.stderr.toString() }];
+  if (setup) {
+    const proc = await dockerRun(cfg, mounts, {}, ["sh", "-c", setup]).nothrow();
+    if (proc.exitCode !== 0) {
+      return [{ name: setup, ok: false, output: proc.stdout.toString() + proc.stderr.toString() }];
+    }
   }
-  for (const name of CHECKS.filter((c) => only.includes(c))) {
-    const proc = await dockerRun(cfg, mounts, {}, ["bun", "run", name]).nothrow();
+  for (const name of rest.filter((c) => !only || only.includes(c))) {
+    const proc = await dockerRun(cfg, mounts, {}, ["sh", "-c", name]).nothrow();
     const output = proc.stdout.toString() + proc.stderr.toString();
     results.push({ name, ok: proc.exitCode === 0, output });
     if (proc.exitCode !== 0) break;
   }
-  if (only === CHECKS) await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
+  if (!only) await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
   return results;
 }
 

@@ -1,5 +1,6 @@
-# Copy to <target repo>/.github/workflows/agent.yml
-name: agent
+# Copy to <your repo>/.github/workflows/epicteto.yml and edit the three values under `env`.
+# No secrets are needed here: the runner holds them.
+name: epicteto
 
 on:
   issues:
@@ -23,63 +24,73 @@ on:
 permissions: {}
 
 env:
-  # Paths that count as UI: a diff touching them gets a verification video.
+  # Who may trigger the agent (GitHub login) and the agent's own login (App slug + "[bot]").
+  EPICTETO_OWNER: ruangustavo
+  EPICTETO_BOT: ruan-agent-experiment[bot]
+  # Paths that count as UI: a diff touching them gets a verification video. Empty disables video.
   UI_GLOBS: "apps/web/**"
+  # Commands run inside the agent container, in order, stopping at the first failure.
+  # The first one is setup and always runs. Leave empty for the Bun defaults.
+  CHECKS: ""
 
 jobs:
   resolve:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issues' && github.event.label.name == 'agent' && github.event.sender.login == 'ruangustavo') ||
-      (github.event_name == 'pull_request_review' && (github.event.review.state == 'changes_requested' || (github.event.review.state == 'commented' && github.event.review.body != '')) && github.event.sender.login == 'ruangustavo' && github.event.pull_request.user.login == 'ruan-agent-experiment[bot]')
-    runs-on: [self-hosted, agent]
+    runs-on: [self-hosted, epicteto]
     outputs:
       issue: ${{ steps.ids.outputs.issue }}
       pr: ${{ steps.ids.outputs.pr }}
+      go: ${{ steps.ids.outputs.go }}
     steps:
       - id: ids
         env:
           EVENT: ${{ github.event_name }}
+          SENDER: ${{ github.event.sender.login }}
+          LABEL: ${{ github.event.label.name }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           ISSUE_FROM_EVENT: ${{ github.event.issue.number }}
           PR_FROM_EVENT: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           INPUT_ISSUE: ${{ inputs.issue }}
           INPUT_PR: ${{ inputs.pr }}
         run: |
+          go=false; issue=""; pr=""
           case "$EVENT" in
-            issues)              issue="$ISSUE_FROM_EVENT"; pr="" ;;
-            pull_request_review) issue="$(printf '%s' "$HEAD_REF" | sed -nE 's#^agent/([0-9]+)-.*#\1#p')"; pr="$PR_FROM_EVENT" ;;
-            workflow_dispatch)   issue="$INPUT_ISSUE"; pr="$INPUT_PR" ;;
+            issues)
+              [ "$LABEL" = "agent" ] && [ "$SENDER" = "$EPICTETO_OWNER" ] && go=true
+              issue="$ISSUE_FROM_EVENT" ;;
+            pull_request_review)
+              if [ "$SENDER" = "$EPICTETO_OWNER" ] && [ "$PR_AUTHOR" = "$EPICTETO_BOT" ]; then
+                if [ "$REVIEW_STATE" = "changes_requested" ] || { [ "$REVIEW_STATE" = "commented" ] && [ -n "$REVIEW_BODY" ]; }; then go=true; fi
+              fi
+              issue="$(printf '%s' "$HEAD_REF" | sed -nE 's#^agent/([0-9]+)-.*#\1#p')"; pr="$PR_FROM_EVENT" ;;
+            workflow_dispatch)
+              go=true; issue="$INPUT_ISSUE"; pr="$INPUT_PR" ;;
           esac
-          [ -n "$issue" ] || { echo "could not resolve issue number"; exit 1; }
+          [ "$go" = true ] && [ -z "$issue" ] && { echo "could not resolve issue number"; exit 1; }
+          echo "go=$go" >> "$GITHUB_OUTPUT"
           echo "issue=$issue" >> "$GITHUB_OUTPUT"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
   run:
     needs: resolve
+    if: needs.resolve.outputs.go == 'true'
     concurrency:
-      group: agent-${{ needs.resolve.outputs.issue }}
+      group: epicteto-${{ needs.resolve.outputs.issue }}
       cancel-in-progress: false
-    runs-on: [self-hosted, agent]
+    runs-on: [self-hosted, epicteto]
     timeout-minutes: 90
     steps:
-      - uses: actions/create-github-app-token@v2
-        id: app
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
       - name: Run agent
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          APP_SLUG: ${{ steps.app.outputs.app-slug }}
-          APP_ID: ${{ secrets.APP_ID }}
           REPO: ${{ github.repository }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
           ISSUE: ${{ needs.resolve.outputs.issue }}
           PR: ${{ needs.resolve.outputs.pr }}
           REVIEW_BODY: ${{ github.event.review.body }}
-          UI_GLOBS: ${{ env.UI_GLOBS }}
-          ATTACH_TOKEN: ${{ secrets.ATTACH_TOKEN }}
           RERECORD: ${{ inputs.rerecord }}
+          UI_GLOBS: ${{ env.UI_GLOBS }}
+          CHECKS: ${{ env.CHECKS }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: "$AGENT_HOME/bin/agent-run"

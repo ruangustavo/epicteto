@@ -1,4 +1,4 @@
-The checks fail on your branch but pass on `main`, so your change introduced the failure. Fix it, then run the checks again yourself before finishing.
+The checks fail on your branch but pass on the base branch, so your change introduced the failure. Fix it, then run the checks again yourself before finishing.
 
 Attempt {{attempt}} of {{max}}.
 

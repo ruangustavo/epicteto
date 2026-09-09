@@ -3,5 +3,5 @@
     "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
     "strict": true, "noEmit": true, "skipLibCheck": true, "types": ["bun-types"]
   },
-  "include": ["bin", "src"]
+  "include": ["bin", "src", "runner", "scripts"]
 }

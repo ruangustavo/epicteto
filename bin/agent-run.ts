@@ -8,7 +8,7 @@ import { checksTable, parseResult, prBody, statusComment } from "../src/report";
 import * as review from "../src/review";
 import { composeDown, composeUp, uiTouched, uploadAttachment } from "../src/video";
 
-const cfg = loadConfig();
+const cfg = await loadConfig();
 const p = paths(cfg);
 const runUrl = process.env.RUN_URL;
 mkdirSync(`${p.state}/videos`, { recursive: true });
@@ -51,9 +51,9 @@ async function runAgentAndChecks(prompt: string, resultFileName: string): Promis
 
 const MAX_ATTEMPTS = 5;
 
-/** Is this check also red on main? Then the agent did not cause it. */
+/** Is this check also red on the base branch? Then the agent did not cause it. */
 async function preExisting(check: CheckResult): Promise<boolean> {
-  await git.ensureBaselineWorktree(p.bareRepo, p.baselineWorktree);
+  await git.ensureBaselineWorktree(p.bareRepo, p.baselineWorktree, cfg.baseBranch);
   const baselineMounts: ContainerMounts = { ...mounts, worktree: p.baselineWorktree };
   const [onMain] = await runChecks(cfg, baselineMounts, [check.name]);
   return onMain ? !onMain.ok : false;
@@ -61,7 +61,7 @@ async function preExisting(check: CheckResult): Promise<boolean> {
 
 /**
  * Runs the checks. A failure the agent introduced goes back to the agent in the same session
- * until green or MAX_ATTEMPTS turns. A failure that is also red on main is reported and not retried.
+ * until green or MAX_ATTEMPTS turns. A failure that is also red on the base branch is reported and not retried.
  */
 async function checksWithRetry(resultFile: string, prUrl?: string): Promise<{ green: boolean; preExisting: CheckResult | null }> {
   for (let attempt = 1; ; attempt++) {
@@ -71,7 +71,7 @@ async function checksWithRetry(resultFile: string, prUrl?: string): Promise<{ gr
     log(`checks attempt ${attempt}: ${checks.map((c) => `${c.name}=${c.ok}`).join(" ")}`);
     if (!failed) return { green: true, preExisting: null };
     if (await preExisting(failed)) {
-      log(`${failed.name} is also red on main; not the agent's fault`);
+      log(`${failed.name} is also red on the base branch; not the agent's fault`);
       return { green: false, preExisting: failed };
     }
     if (attempt === MAX_ATTEMPTS) return { green: false, preExisting: null };
@@ -169,7 +169,7 @@ async function implement(cfg: RunConfig) {
   await gh.setLabels(cfg, [RUNNING], TERMINAL);
   await gh.upsertStatusComment(cfg, statusComment({ phase: "running: implementing", runUrl, checks }));
   await git.ensureBareRepo(cfg, p.bareRepo);
-  await git.ensureWorktree(p.bareRepo, p.worktree, branch);
+  await git.ensureWorktree(p.bareRepo, p.worktree, branch, cfg.baseBranch);
 
   const prompt = await renderPrompt(cfg, issue, comments);
   const outcome = await runAgentAndChecks(prompt, "result.md");
@@ -181,12 +181,12 @@ async function implement(cfg: RunConfig) {
   if (result.questions) return finish("needs input: the agent has questions", "agent:needs-input", { detail: `### Questions\n${result.questions}` });
 
   await git.commitLeftovers(p.worktree, botIdentity(cfg));
-  if (!(await git.hasCommitsAheadOfMain(p.worktree))) return finish("needs input: agent made no changes", "agent:needs-input");
+  if (!(await git.hasCommitsAheadOfBase(p.worktree, cfg.baseBranch))) return finish("needs input: agent made no changes", "agent:needs-input");
 
   const outcome2 = await checksWithRetry("result.md");
   const green = outcome2.green;
   const finalResult = parseResult(await Bun.file(`${p.state}/result.md`).text()) ?? result;
-  if (outcome2.preExisting) finalResult.notes += `\n\n⚠ \`${outcome2.preExisting.name}\` also fails on \`main\`; this failure predates the change.`;
+  if (outcome2.preExisting) finalResult.notes += `\n\n⚠ \`${outcome2.preExisting.name}\` also fails on \`${cfg.baseBranch}\`; this failure predates the change.`;
 
   await git.pushBranch(cfg, p.worktree, branch);
   let body = prBody(issue.number, finalResult, checks);
@@ -197,14 +197,14 @@ async function implement(cfg: RunConfig) {
   log(`PR ${prUrl}`);
 
   if (green) {
-    const verification = await verifyUi(issue, await git.changedFiles(p.worktree), prUrl);
+    const verification = await verifyUi(issue, await git.changedFiles(p.worktree, cfg.baseBranch), prUrl);
     const section = verificationMarkdown(verification);
     if (section) body = body.replace(`Closes #${issue.number}`, `${section}\n\nCloses #${issue.number}`);
   }
   await gh.updatePrBody(cfg, prNumber, body);
 
   if (green) return finish("in review", "agent:in-review", { prUrl });
-  if (outcome2.preExisting) return finish(`in review (\`${outcome2.preExisting.name}\` already red on main)`, "agent:in-review", { prUrl });
+  if (outcome2.preExisting) return finish(`in review (\`${outcome2.preExisting.name}\` already red on ${cfg.baseBranch})`, "agent:in-review", { prUrl });
   return finish(`needs input: checks still failing after ${MAX_ATTEMPTS} attempts, PR opened as draft`, "agent:needs-input", { prUrl });
 }
 
@@ -220,8 +220,8 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
   await gh.setLabels(cfg, [RUNNING], TERMINAL);
   await gh.upsertStatusComment(cfg, statusComment({ phase: "running: addressing review", runUrl, checks, prUrl }));
   await git.ensureBareRepo(cfg, p.bareRepo);
-  await git.ensureWorktree(p.bareRepo, p.worktree, pr.headRef);
-  const conflicts = await git.rebaseOnMain(p.worktree, botIdentity(cfg));
+  await git.ensureWorktree(p.bareRepo, p.worktree, pr.headRef, cfg.baseBranch);
+  const conflicts = await git.rebaseOnBase(p.worktree, cfg.baseBranch, botIdentity(cfg));
   if (conflicts.length) log(`rebase conflicts: ${conflicts.join(", ")}`);
 
   const prompt = await review.renderReviewPrompt(cfg, { pr, issue: cfg.issueNumber, reviewBody, conflicts });
@@ -238,7 +238,7 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
   await git.pushBranch(cfg, p.worktree, pr.headRef);
   const sha = await git.headSha(p.worktree);
   const verification = green
-    ? await verifyUi(await gh.fetchIssue(cfg), await git.changedFiles(p.worktree), prUrl)
+    ? await verifyUi(await gh.fetchIssue(cfg), await git.changedFiles(p.worktree, cfg.baseBranch), prUrl)
     : { url: null, scenario: null, failure: null };
 
   for (const thread of pr.threads) {
@@ -273,9 +273,9 @@ async function rerecord(cfg: RunConfig, prNumber: number) {
   const pr = await review.fetchPullRequest(cfg, prNumber);
   await gh.setLabels(cfg, [RUNNING], TERMINAL);
   await git.ensureBareRepo(cfg, p.bareRepo);
-  await git.ensureWorktree(p.bareRepo, p.worktree, pr.headRef);
+  await git.ensureWorktree(p.bareRepo, p.worktree, pr.headRef, cfg.baseBranch);
   const issue = await gh.fetchIssue(cfg);
-  const verification = await verifyUi(issue, await git.changedFiles(p.worktree), prUrl);
+  const verification = await verifyUi(issue, await git.changedFiles(p.worktree, cfg.baseBranch), prUrl);
   const section = verificationMarkdown(verification);
   const body = await gh.prBody(cfg, prNumber);
   const closes = `Closes #${cfg.issueNumber}`;

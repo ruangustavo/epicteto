@@ -61,7 +61,7 @@ export async function createPr(
   opts: { branch: string; title: string; body: string; draft: boolean },
 ): Promise<string> {
   const draft = opts.draft ? ["--draft"] : [];
-  const url = await $`gh pr create -R ${cfg.repo} --base main --head ${opts.branch} --title ${opts.title} --body ${opts.body} ${draft}`.text();
+  const url = await $`gh pr create -R ${cfg.repo} --base ${cfg.baseBranch} --head ${opts.branch} --title ${opts.title} --body ${opts.body} ${draft}`.text();
   return url.trim();
 }
 

@@ -19,20 +19,20 @@ export async function ensureBareRepo(cfg: RunConfig, bareRepo: string): Promise<
   if (!existsSync(bareRepo)) {
     await $`git clone --bare --quiet ${remoteUrl(cfg)} ${bareRepo}`.quiet();
   }
-  const refspec = "+refs/heads/main:refs/heads/main";
+  const refspec = `+refs/heads/${cfg.baseBranch}:refs/heads/${cfg.baseBranch}`;
   await $`git -C ${bareRepo} fetch --quiet --prune ${remoteUrl(cfg)} ${refspec}`.quiet();
 }
 
-export async function ensureWorktree(bareRepo: string, worktree: string, branch: string): Promise<void> {
+export async function ensureWorktree(bareRepo: string, worktree: string, branch: string, base: string): Promise<void> {
   if (existsSync(worktree)) {
     await $`git -C ${worktree} checkout --quiet ${branch}`.quiet();
     return;
   }
-  await $`git -C ${bareRepo} worktree add --quiet -B ${branch} ${worktree} main`.quiet();
+  await $`git -C ${bareRepo} worktree add --quiet -B ${branch} ${worktree} ${base}`.quiet();
 }
 
-export async function hasCommitsAheadOfMain(worktree: string): Promise<boolean> {
-  const count = await $`git -C ${worktree} rev-list --count main..HEAD`.text();
+export async function hasCommitsAheadOfBase(worktree: string, base: string): Promise<boolean> {
+  const count = await $`git -C ${worktree} rev-list --count ${base}..HEAD`.text();
   return Number(count.trim()) > 0;
 }
 
@@ -48,8 +48,8 @@ export async function pushBranch(cfg: RunConfig, worktree: string, branch: strin
   await $`git -C ${worktree} push --quiet --force ${remoteUrl(cfg)} HEAD:refs/heads/${branch}`.quiet();
 }
 
-export async function changedFiles(worktree: string): Promise<string[]> {
-  const out = await $`git -C ${worktree} diff --name-only main...HEAD`.text();
+export async function changedFiles(worktree: string, base: string): Promise<string[]> {
+  const out = await $`git -C ${worktree} diff --name-only ${base}...HEAD`.text();
   return out.split("\n").filter(Boolean);
 }
 
@@ -57,20 +57,20 @@ export async function headSha(worktree: string): Promise<string> {
   return (await $`git -C ${worktree} rev-parse --short HEAD`.text()).trim();
 }
 
-/** Rebases the worktree on main. Returns the conflicting files (empty when clean); aborts on conflict. */
-export async function rebaseOnMain(worktree: string, identity: { name: string; email: string }): Promise<string[]> {
-  const result = await $`git -C ${worktree} -c user.name=${identity.name} -c user.email=${identity.email} rebase --quiet main`.quiet().nothrow();
+/** Rebases the worktree on the base branch. Returns the conflicting files (empty when clean); aborts on conflict. */
+export async function rebaseOnBase(worktree: string, base: string, identity: { name: string; email: string }): Promise<string[]> {
+  const result = await $`git -C ${worktree} -c user.name=${identity.name} -c user.email=${identity.email} rebase --quiet ${base}`.quiet().nothrow();
   if (result.exitCode === 0) return [];
   const conflicts = (await $`git -C ${worktree} diff --name-only --diff-filter=U`.text()).split("\n").filter(Boolean);
   await $`git -C ${worktree} rebase --abort`.quiet().nothrow();
   return conflicts;
 }
 
-/** A detached checkout of main, used to tell pre-existing failures from ones the agent introduced. */
-export async function ensureBaselineWorktree(bareRepo: string, path: string): Promise<void> {
+/** A detached checkout of the base branch, used to tell pre-existing failures from ones the agent introduced. */
+export async function ensureBaselineWorktree(bareRepo: string, path: string, base: string): Promise<void> {
   if (existsSync(path)) {
-    await $`git -C ${path} checkout --quiet --detach main`.quiet();
+    await $`git -C ${path} checkout --quiet --detach ${base}`.quiet();
     return;
   }
-  await $`git -C ${bareRepo} worktree add --quiet --detach ${path} main`.quiet();
+  await $`git -C ${bareRepo} worktree add --quiet --detach ${path} ${base}`.quiet();
 }
