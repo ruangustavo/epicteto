@@ -4,16 +4,58 @@ name: agent
 on:
   issues:
     types: [labeled]
-
-concurrency:
-  group: agent-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number
+        required: true
+      pr:
+        description: PR number (leave empty for an implement run)
+        required: false
+        default: ""
 
 permissions: {}
 
+env:
+  AGENT_BOT: ruan-agent-experiment[bot]
+  AGENT_OWNER: ruangustavo
+
 jobs:
+  resolve:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && github.event.label.name == 'agent' && github.event.sender.login == 'ruangustavo') ||
+      (github.event_name == 'pull_request_review' && github.event.sender.login == 'ruangustavo' && github.event.pull_request.user.login == 'ruan-agent-experiment[bot]')
+    runs-on: [self-hosted, agent]
+    outputs:
+      issue: ${{ steps.ids.outputs.issue }}
+      pr: ${{ steps.ids.outputs.pr }}
+    steps:
+      - id: ids
+        env:
+          EVENT: ${{ github.event_name }}
+          ISSUE_FROM_EVENT: ${{ github.event.issue.number }}
+          PR_FROM_EVENT: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          INPUT_ISSUE: ${{ inputs.issue }}
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          case "$EVENT" in
+            issues)              issue="$ISSUE_FROM_EVENT"; pr="" ;;
+            pull_request_review) issue="$(printf '%s' "$HEAD_REF" | sed -nE 's#^agent/([0-9]+)-.*#\1#p')"; pr="$PR_FROM_EVENT" ;;
+            workflow_dispatch)   issue="$INPUT_ISSUE"; pr="$INPUT_PR" ;;
+          esac
+          [ -n "$issue" ] || { echo "could not resolve issue number"; exit 1; }
+          echo "issue=$issue" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
   run:
-    if: github.event.label.name == 'agent' && github.event.sender.login == 'ruangustavo'
+    needs: resolve
+    concurrency:
+      group: agent-${{ needs.resolve.outputs.issue }}
+      cancel-in-progress: false
     runs-on: [self-hosted, agent]
     timeout-minutes: 90
     steps:
@@ -29,6 +71,8 @@ jobs:
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
           APP_ID: ${{ secrets.APP_ID }}
           REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ needs.resolve.outputs.issue }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          REVIEW_BODY: ${{ github.event.review.body }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: "$AGENT_HOME/bin/agent-run"

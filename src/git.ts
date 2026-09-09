@@ -52,3 +52,16 @@ export async function changedFiles(worktree: string): Promise<string[]> {
   const out = await $`git -C ${worktree} diff --name-only main...HEAD`.text();
   return out.split("\n").filter(Boolean);
 }
+
+export async function headSha(worktree: string): Promise<string> {
+  return (await $`git -C ${worktree} rev-parse --short HEAD`.text()).trim();
+}
+
+/** Rebases the worktree on main. Returns the conflicting files (empty when clean); aborts on conflict. */
+export async function rebaseOnMain(worktree: string, identity: { name: string; email: string }): Promise<string[]> {
+  const result = await $`git -C ${worktree} -c user.name=${identity.name} -c user.email=${identity.email} rebase --quiet main`.quiet().nothrow();
+  if (result.exitCode === 0) return [];
+  const conflicts = (await $`git -C ${worktree} diff --name-only --diff-filter=U`.text()).split("\n").filter(Boolean);
+  await $`git -C ${worktree} rebase --abort`.quiet().nothrow();
+  return conflicts;
+}
