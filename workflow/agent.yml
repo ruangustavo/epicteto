@@ -1,0 +1,34 @@
+# Copy to <target repo>/.github/workflows/agent.yml
+name: agent
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: agent-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  run:
+    if: github.event.label.name == 'agent' && github.event.sender.login == 'ruangustavo'
+    runs-on: [self-hosted, agent]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Run agent
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          APP_ID: ${{ secrets.APP_ID }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: "$AGENT_HOME/bin/agent-run"

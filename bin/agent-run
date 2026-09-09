@@ -1,0 +1,3 @@
+#!/bin/sh
+# Entry point invoked by the target repo's workflow on the self-hosted runner.
+exec bun run "$(dirname "$0")/agent-run.ts" "$@"

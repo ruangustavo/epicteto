@@ -1,0 +1,48 @@
+export interface RunConfig {
+  repo: string;
+  owner: string;
+  name: string;
+  issueNumber: number;
+  token: string;
+  appSlug: string;
+  appId: string;
+  agentHome: string;
+  agentData: string;
+  model: string;
+  image: string;
+}
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`missing env ${name}`);
+  return value;
+}
+
+export function loadConfig(): RunConfig {
+  const repo = required("REPO");
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) throw new Error(`REPO must be owner/name, got ${repo}`);
+  return {
+    repo,
+    owner,
+    name,
+    issueNumber: Number(required("ISSUE")),
+    token: required("GH_TOKEN"),
+    appSlug: required("APP_SLUG"),
+    appId: required("APP_ID"),
+    agentHome: required("AGENT_HOME"),
+    agentData: required("AGENT_DATA"),
+    model: process.env.AGENT_MODEL ?? "openai-codex/gpt-5.5",
+    image: process.env.AGENT_IMAGE ?? "agent-runner:local",
+  };
+}
+
+export function paths(cfg: RunConfig) {
+  const base = `${cfg.agentData}/${cfg.owner}/${cfg.name}`;
+  return {
+    bareRepo: `${base}/repo.git`,
+    worktree: `${base}/worktrees/issue-${cfg.issueNumber}`,
+    state: `${base}/state/issue-${cfg.issueNumber}`,
+    piHome: `${cfg.agentData}/pi-home`,
+  };
+}
