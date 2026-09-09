@@ -49,6 +49,45 @@ async function runAgentAndChecks(prompt: string, resultFileName: string): Promis
   return { output: run.output, resultText: await file.text() };
 }
 
+const MAX_ATTEMPTS = 5;
+
+/** Is this check also red on main? Then the agent did not cause it. */
+async function preExisting(check: CheckResult): Promise<boolean> {
+  await git.ensureBaselineWorktree(p.bareRepo, p.baselineWorktree);
+  const baselineMounts: ContainerMounts = { ...mounts, worktree: p.baselineWorktree };
+  const [onMain] = await runChecks(cfg, baselineMounts, [check.name]);
+  return onMain ? !onMain.ok : false;
+}
+
+/**
+ * Runs the checks. A failure the agent introduced goes back to the agent in the same session
+ * until green or MAX_ATTEMPTS turns. A failure that is also red on main is reported and not retried.
+ */
+async function checksWithRetry(resultFile: string, prUrl?: string): Promise<{ green: boolean; preExisting: CheckResult | null }> {
+  for (let attempt = 1; ; attempt++) {
+    await gh.upsertStatusComment(cfg, statusComment({ phase: `running: checks (attempt ${attempt}/${MAX_ATTEMPTS})`, runUrl, checks, prUrl }));
+    checks = await runChecks(cfg, mounts);
+    const failed = checks.find((c) => !c.ok);
+    log(`checks attempt ${attempt}: ${checks.map((c) => `${c.name}=${c.ok}`).join(" ")}`);
+    if (!failed) return { green: true, preExisting: null };
+    if (await preExisting(failed)) {
+      log(`${failed.name} is also red on main; not the agent's fault`);
+      return { green: false, preExisting: failed };
+    }
+    if (attempt === MAX_ATTEMPTS) return { green: false, preExisting: null };
+    const prompt = await renderTemplate("checks-failed-prompt.md", {
+      attempt: String(attempt + 1),
+      max: String(MAX_ATTEMPTS),
+      check: failed.name,
+      output: failed.output.slice(-6000),
+      result_file: resultFile,
+    });
+    const run = await runAgent(cfg, mounts, prompt, `checks-failed-${attempt}.md`);
+    log(`retry agent exited ${run.exitCode}`);
+    await git.commitLeftovers(p.worktree, botIdentity(cfg));
+  }
+}
+
 interface Verification {
   url: string | null;
   scenario: string | null;
@@ -144,15 +183,16 @@ async function implement(cfg: RunConfig) {
   await git.commitLeftovers(p.worktree, botIdentity(cfg));
   if (!(await git.hasCommitsAheadOfMain(p.worktree))) return finish("needs input: agent made no changes", "agent:needs-input");
 
-  await gh.upsertStatusComment(cfg, statusComment({ phase: "running: checks", runUrl, checks }));
-  checks = await runChecks(cfg, mounts);
-  const green = checks.every((c) => c.ok);
-  log(`checks ${green ? "green" : "red"}: ${checks.map((c) => `${c.name}=${c.ok}`).join(" ")}`);
+  const outcome2 = await checksWithRetry("result.md");
+  const green = outcome2.green;
+  const finalResult = parseResult(await Bun.file(`${p.state}/result.md`).text()) ?? result;
+  if (outcome2.preExisting) finalResult.notes += `\n\n⚠ \`${outcome2.preExisting.name}\` also fails on \`main\`; this failure predates the change.`;
 
   await git.pushBranch(cfg, p.worktree, branch);
-  let body = prBody(issue.number, result, checks);
+  let body = prBody(issue.number, finalResult, checks);
   const existing = await gh.findOpenPr(cfg, branch);
-  const prNumber = existing ?? Number((await gh.createPr(cfg, { branch, title: issue.title, body, draft: !green })).split("/").pop());
+  const openAsReady = green || outcome2.preExisting !== null;
+  const prNumber = existing ?? Number((await gh.createPr(cfg, { branch, title: issue.title, body, draft: !openAsReady })).split("/").pop());
   const prUrl = `https://github.com/${cfg.repo}/pull/${prNumber}`;
   log(`PR ${prUrl}`);
 
@@ -163,9 +203,9 @@ async function implement(cfg: RunConfig) {
   }
   await gh.updatePrBody(cfg, prNumber, body);
 
-  return green
-    ? finish("in review", "agent:in-review", { prUrl })
-    : finish("needs input: checks failed, PR opened as draft", "agent:needs-input", { prUrl });
+  if (green) return finish("in review", "agent:in-review", { prUrl });
+  if (outcome2.preExisting) return finish(`in review (\`${outcome2.preExisting.name}\` already red on main)`, "agent:in-review", { prUrl });
+  return finish(`needs input: checks still failing after ${MAX_ATTEMPTS} attempts, PR opened as draft`, "agent:needs-input", { prUrl });
 }
 
 async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string) {
@@ -192,10 +232,8 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
   if (!result) return finish("needs input: review result is malformed", "agent:needs-input", { prUrl, detail: agentOutputDetails(outcome.output) });
 
   await git.commitLeftovers(p.worktree, botIdentity(cfg));
-  await gh.upsertStatusComment(cfg, statusComment({ phase: "running: checks", runUrl, checks, prUrl }));
-  checks = await runChecks(cfg, mounts);
-  const green = checks.every((c) => c.ok);
-  log(`checks ${green ? "green" : "red"}`);
+  const outcome2 = await checksWithRetry("review-result.md", prUrl);
+  const green = outcome2.green || outcome2.preExisting !== null;
 
   await git.pushBranch(cfg, p.worktree, pr.headRef);
   const sha = await git.headSha(p.worktree);
@@ -227,7 +265,7 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
   await Bun.file(`${p.state}/review-result.md`).delete();
   return green
     ? finish("in review", "agent:in-review", { prUrl })
-    : finish("needs input: checks failed after review round", "agent:needs-input", { prUrl });
+    : finish(`needs input: checks still failing after ${MAX_ATTEMPTS} attempts`, "agent:needs-input", { prUrl });
 }
 
 async function rerecord(cfg: RunConfig, prNumber: number) {

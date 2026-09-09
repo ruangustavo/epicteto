@@ -78,19 +78,19 @@ export interface CheckResult {
 
 const CHECKS = ["typecheck", "lint", "test", "build"] as const;
 
-export async function runChecks(cfg: RunConfig, mounts: ContainerMounts): Promise<CheckResult[]> {
+export async function runChecks(cfg: RunConfig, mounts: ContainerMounts, only: readonly string[] = CHECKS): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const install = await dockerRun(cfg, mounts, {}, ["bun", "install"]).nothrow();
   if (install.exitCode !== 0) {
     return [{ name: "install", ok: false, output: install.stdout.toString() + install.stderr.toString() }];
   }
-  for (const name of CHECKS) {
+  for (const name of CHECKS.filter((c) => only.includes(c))) {
     const proc = await dockerRun(cfg, mounts, {}, ["bun", "run", name]).nothrow();
     const output = proc.stdout.toString() + proc.stderr.toString();
     results.push({ name, ok: proc.exitCode === 0, output });
     if (proc.exitCode !== 0) break;
   }
-  await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
+  if (only === CHECKS) await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
   return results;
 }
 

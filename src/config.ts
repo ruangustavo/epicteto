@@ -59,6 +59,7 @@ export function paths(cfg: RunConfig) {
   return {
     bareRepo: `${base}/repo.git`,
     worktree: `${base}/worktrees/issue-${cfg.issueNumber}`,
+    baselineWorktree: `${base}/worktrees/baseline`,
     state: `${base}/state/issue-${cfg.issueNumber}`,
     piHome: `${cfg.agentData}/pi-home`,
   };

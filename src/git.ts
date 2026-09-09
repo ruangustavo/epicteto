@@ -65,3 +65,12 @@ export async function rebaseOnMain(worktree: string, identity: { name: string; e
   await $`git -C ${worktree} rebase --abort`.quiet().nothrow();
   return conflicts;
 }
+
+/** A detached checkout of main, used to tell pre-existing failures from ones the agent introduced. */
+export async function ensureBaselineWorktree(bareRepo: string, path: string): Promise<void> {
+  if (existsSync(path)) {
+    await $`git -C ${path} checkout --quiet --detach main`.quiet();
+    return;
+  }
+  await $`git -C ${bareRepo} worktree add --quiet --detach ${path} main`.quiet();
+}
