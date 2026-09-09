@@ -2,7 +2,10 @@ import { $ } from "bun";
 import type { RunConfig } from "./config";
 
 export interface IssueComment {
-  user: { login: string; type: string };
+  user: {
+    login: string;
+    type: string;
+  };
   body: string;
 }
 
@@ -25,10 +28,14 @@ export async function fetchIssueComments(cfg: RunConfig): Promise<IssueComment[]
 
 export async function setLabels(cfg: RunConfig, add: string[], remove: string[]): Promise<void> {
   for (const label of remove) {
-    await $`gh api -X DELETE repos/${cfg.repo}/issues/${cfg.issueNumber}/labels/${encodeURIComponent(label)}`.quiet().nothrow();
+    await $`gh api -X DELETE repos/${cfg.repo}/issues/${cfg.issueNumber}/labels/${encodeURIComponent(label)}`
+      .quiet()
+      .nothrow();
   }
+
   if (add.length > 0) {
     const body = JSON.stringify({ labels: add });
+
     await $`gh api -X POST repos/${cfg.repo}/issues/${cfg.issueNumber}/labels --input - < ${new Response(body)}`.quiet();
   }
 }
@@ -38,30 +45,44 @@ export async function upsertStatusComment(cfg: RunConfig, markdown: string): Pro
   const comments = await fetchIssueComments(cfg);
   const existing = comments.find((c) => c.user.type === "Bot" && c.body.startsWith(STATUS_MARKER));
   const payload = new Response(JSON.stringify({ body }));
+
   if (existing) {
-    const all: { id: number; body: string }[] =
-      await $`gh api --paginate repos/${cfg.repo}/issues/${cfg.issueNumber}/comments`.json();
+    const all: {
+      id: number;
+      body: string;
+    }[] = await $`gh api --paginate repos/${cfg.repo}/issues/${cfg.issueNumber}/comments`.json();
     const id = all.find((c) => c.body.startsWith(STATUS_MARKER))?.id;
+
     if (id) {
       await $`gh api -X PATCH repos/${cfg.repo}/issues/comments/${id} --input - < ${payload}`.quiet();
+
       return;
     }
   }
+
   await $`gh api -X POST repos/${cfg.repo}/issues/${cfg.issueNumber}/comments --input - < ${payload}`.quiet();
 }
 
 export async function findOpenPr(cfg: RunConfig, branch: string): Promise<number | null> {
   const prs: { number: number }[] =
     await $`gh pr list -R ${cfg.repo} --head ${branch} --state open --json number`.json();
+
   return prs[0]?.number ?? null;
 }
 
 export async function createPr(
   cfg: RunConfig,
-  opts: { branch: string; title: string; body: string; draft: boolean },
+  opts: {
+    branch: string;
+    title: string;
+    body: string;
+    draft: boolean;
+  },
 ): Promise<string> {
   const draft = opts.draft ? ["--draft"] : [];
-  const url = await $`gh pr create -R ${cfg.repo} --base ${cfg.baseBranch} --head ${opts.branch} --title ${opts.title} --body ${opts.body} ${draft}`.text();
+  const url =
+    await $`gh pr create -R ${cfg.repo} --base ${cfg.baseBranch} --head ${opts.branch} --title ${opts.title} --body ${opts.body} ${draft}`.text();
+
   return url.trim();
 }
 

@@ -17,12 +17,17 @@ export function botIdentity(cfg: RunConfig) {
   };
 }
 
-export async function renderPrompt(cfg: RunConfig, issue: Issue, comments: IssueComment[]): Promise<string> {
+export async function renderPrompt(
+  cfg: RunConfig,
+  issue: Issue,
+  comments: IssueComment[],
+): Promise<string> {
   const template = await Bun.file(`${cfg.agentHome}/templates/prompt.md`).text();
   const humanComments = comments.filter((c) => c.user.type !== "Bot");
   const rendered = humanComments.length
     ? `# Comments\n\n${humanComments.map((c) => `**@${c.user.login}:**\n${c.body}`).join("\n\n")}`
     : "";
+
   return template
     .replace("{{number}}", String(issue.number))
     .replace("{{title}}", issue.title)
@@ -30,7 +35,12 @@ export async function renderPrompt(cfg: RunConfig, issue: Issue, comments: Issue
     .replace("{{comments}}", rendered);
 }
 
-function dockerRun(cfg: RunConfig, mounts: ContainerMounts, extraEnv: Record<string, string>, command: string[]) {
+function dockerRun(
+  cfg: RunConfig,
+  mounts: ContainerMounts,
+  extraEnv: Record<string, string>,
+  command: string[],
+) {
   const identity = botIdentity(cfg);
   const env = Object.entries({
     GIT_AUTHOR_NAME: identity.name,
@@ -41,6 +51,7 @@ function dockerRun(cfg: RunConfig, mounts: ContainerMounts, extraEnv: Record<str
   }).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   const network = mounts.network ? ["--network", mounts.network] : [];
   const h = (p: string) => hostPath(cfg, p);
+
   return $`docker run --rm ${env} ${network} \
     -v ${h(mounts.worktree)}:/work -v ${h(mounts.bareRepo)}:${mounts.bareRepo} \
     -v ${h(mounts.state)}:/state -v ${h(mounts.piHome)}:/root/.pi/agent \
@@ -53,17 +64,27 @@ export interface AgentRun {
   quotaExhausted: boolean;
 }
 
-export async function runAgent(cfg: RunConfig, mounts: ContainerMounts, prompt: string, promptFile = "prompt.md"): Promise<AgentRun> {
+export async function runAgent(
+  cfg: RunConfig,
+  mounts: ContainerMounts,
+  prompt: string,
+  promptFile = "prompt.md",
+): Promise<AgentRun> {
   await Bun.write(`${mounts.state}/${promptFile}`, prompt);
   const proc = await dockerRun(cfg, mounts, {}, [
     "sh",
     "-c",
     `pi -p --model "$AGENT_MODEL" --session /state/session.jsonl --no-extensions -- "$(cat /state/${promptFile})"`,
   ])
-    .env({ ...process.env, AGENT_MODEL: cfg.model })
+    .env({
+      ...process.env,
+      AGENT_MODEL: cfg.model,
+    })
     .nothrow();
   const output = proc.stdout.toString() + proc.stderr.toString();
+
   await Bun.write(`${mounts.state}/agent-output.log`, output);
+
   return {
     exitCode: proc.exitCode,
     output,
@@ -81,22 +102,47 @@ export interface CheckResult {
  * Runs cfg.checks in order, stopping at the first failure. The first command is setup and always runs.
  * `only` restricts the run to setup plus the named commands (used for the baseline on the base branch).
  */
-export async function runChecks(cfg: RunConfig, mounts: ContainerMounts, only?: readonly string[]): Promise<CheckResult[]> {
+export async function runChecks(
+  cfg: RunConfig,
+  mounts: ContainerMounts,
+  only?: readonly string[],
+): Promise<CheckResult[]> {
   const [setup, ...rest] = cfg.checks;
   const results: CheckResult[] = [];
+
   if (setup) {
     const proc = await dockerRun(cfg, mounts, {}, ["sh", "-c", setup]).nothrow();
+
     if (proc.exitCode !== 0) {
-      return [{ name: setup, ok: false, output: proc.stdout.toString() + proc.stderr.toString() }];
+      return [
+        {
+          name: setup,
+          ok: false,
+          output: proc.stdout.toString() + proc.stderr.toString(),
+        },
+      ];
     }
   }
+
   for (const name of rest.filter((c) => !only || only.includes(c))) {
     const proc = await dockerRun(cfg, mounts, {}, ["sh", "-c", name]).nothrow();
     const output = proc.stdout.toString() + proc.stderr.toString();
-    results.push({ name, ok: proc.exitCode === 0, output });
+
+    results.push({
+      name,
+      ok: proc.exitCode === 0,
+      output,
+    });
+
     if (proc.exitCode !== 0) break;
   }
-  if (!only) await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
+
+  if (!only)
+    await Bun.write(
+      `${mounts.state}/checks.log`,
+      results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"),
+    );
+
   return results;
 }
 
@@ -106,7 +152,22 @@ export interface ShellResult {
 }
 
 /** Runs a shell snippet inside the agent container (app boot, script replay, recording). */
-export async function runShell(cfg: RunConfig, mounts: ContainerMounts, script: string, timeoutSec = 600): Promise<ShellResult> {
-  const proc = await dockerRun(cfg, mounts, {}, ["timeout", String(timeoutSec), "sh", "-c", script]).nothrow();
-  return { exitCode: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
+export async function runShell(
+  cfg: RunConfig,
+  mounts: ContainerMounts,
+  script: string,
+  timeoutSec = 600,
+): Promise<ShellResult> {
+  const proc = await dockerRun(cfg, mounts, {}, [
+    "timeout",
+    String(timeoutSec),
+    "sh",
+    "-c",
+    script,
+  ]).nothrow();
+
+  return {
+    exitCode: proc.exitCode,
+    output: proc.stdout.toString() + proc.stderr.toString(),
+  };
 }

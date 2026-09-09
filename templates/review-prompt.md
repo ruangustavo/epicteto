@@ -25,11 +25,14 @@ The reviewer left feedback. Address it in this same checkout and session.
 When you are done, write `/state/review-result.md` with this exact structure:
 
 ## Summary
+
 Two to five bullets: what changed in this round, mentioning files by path.
 
 ## Threads
+
 One block per thread, using the thread id given above:
 
 ### thread:<id>
+
 status: addressed | not-applicable
 One or two sentences for the reviewer. If addressed, name what changed. If not-applicable, give the reason.

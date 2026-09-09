@@ -22,11 +22,14 @@ Read AGENTS.md first: it has the boot recipe, the checks, and the conventions.
 When you are done, write `/state/result.md` with exactly these sections:
 
 ## Problem
+
 One or two sentences: what was wrong or missing, from the user's point of view.
 
 ## Fix
+
 Bullet list of what you changed and why. Mention files by path.
 
 ## Notes
+
 Anything the reviewer should know: trade-offs, follow-ups, things you deliberately left out.
 Write "None." if empty.

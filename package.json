@@ -2,6 +2,19 @@
   "name": "epicteto",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
-  "devDependencies": { "bun-types": "latest", "typescript": "^5.6.0" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "oxlint",
+    "fmt": "oxlint --fix; oxfmt",
+    "check": "bun run typecheck && bun run lint && oxfmt --check"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.82.0",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "bun-types": "latest",
+    "oxfmt": "^0.67.0",
+    "oxlint": "1.82.0",
+    "oxlint-readable": "github:ruangustavo/oxlint-readable",
+    "typescript": "^5.6.0"
+  }
 }

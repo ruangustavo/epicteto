@@ -3,6 +3,7 @@ Replaying the verification scripts failed. Fix them following the `verify-ui` sk
 Exit code: {{exit_code}}
 
 Output (tail):
+
 ```
 {{output}}
 ```
