@@ -19,7 +19,8 @@ export async function ensureBareRepo(cfg: RunConfig, bareRepo: string): Promise<
   if (!existsSync(bareRepo)) {
     await $`git clone --bare --quiet ${remoteUrl(cfg)} ${bareRepo}`.quiet();
   }
-  await $`git -C ${bareRepo} fetch --quiet --prune ${remoteUrl(cfg)} +refs/heads/*:refs/heads/*`.quiet();
+  const refspec = "+refs/heads/*:refs/heads/*";
+  await $`git -C ${bareRepo} fetch --quiet --prune ${remoteUrl(cfg)} ${refspec}`.quiet();
 }
 
 export async function ensureWorktree(bareRepo: string, worktree: string, branch: string): Promise<void> {

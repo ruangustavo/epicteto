@@ -20,6 +20,15 @@ async function finish(phase: string, labels: { add: string[]; remove: string[] }
   await gh.setLabels(cfg, labels.add, labels.remove);
 }
 
+process.on("unhandledRejection", async (err) => {
+  const message = err instanceof Error ? `${err.message}\n${(err as { stderr?: Buffer }).stderr?.toString() ?? ""}` : String(err);
+  log(`fatal: ${message}`);
+  await finish("failed: orchestrator error", { add: ["agent:needs-input"], remove: ["agent:running"] }, {
+    detail: `<details><summary>error</summary>\n\n\`\`\`\n${message.slice(-3000)}\n\`\`\`\n</details>`,
+  }).catch(() => {});
+  process.exit(1);
+});
+
 const issue = await gh.fetchIssue(cfg);
 const comments = await gh.fetchIssueComments(cfg);
 const branch = git.branchName(issue.number, issue.title);
