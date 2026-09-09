@@ -4,6 +4,7 @@ import type { Issue, IssueComment } from "./github";
 
 export interface ContainerMounts {
   worktree: string;
+  bareRepo: string;
   state: string;
   piHome: string;
 }
@@ -38,7 +39,8 @@ function dockerRun(cfg: RunConfig, mounts: ContainerMounts, extraEnv: Record<str
     ...extraEnv,
   }).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   return $`docker run --rm ${env} \
-    -v ${mounts.worktree}:/work -v ${mounts.state}:/state -v ${mounts.piHome}:/root/.pi/agent \
+    -v ${mounts.worktree}:/work -v ${mounts.bareRepo}:${mounts.bareRepo} \
+    -v ${mounts.state}:/state -v ${mounts.piHome}:/root/.pi/agent \
     -w /work ${cfg.image} ${command}`;
 }
 

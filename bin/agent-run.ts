@@ -39,7 +39,7 @@ await gh.upsertStatusComment(cfg, statusComment({ phase: "running: implementing"
 
 await git.ensureBareRepo(cfg, p.bareRepo);
 await git.ensureWorktree(p.bareRepo, p.worktree, branch);
-const mounts = { worktree: p.worktree, state: p.state, piHome: p.piHome };
+const mounts = { worktree: p.worktree, bareRepo: p.bareRepo, state: p.state, piHome: p.piHome };
 
 const prompt = await renderPrompt(cfg, issue, comments);
 const run = await runAgent(cfg, mounts, prompt);
