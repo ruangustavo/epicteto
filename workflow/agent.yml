@@ -31,7 +31,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issues' && github.event.label.name == 'agent' && github.event.sender.login == 'ruangustavo') ||
-      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested' && github.event.sender.login == 'ruangustavo' && github.event.pull_request.user.login == 'ruan-agent-experiment[bot]')
+      (github.event_name == 'pull_request_review' && (github.event.review.state == 'changes_requested' || (github.event.review.state == 'commented' && github.event.review.body != '')) && github.event.sender.login == 'ruangustavo' && github.event.pull_request.user.login == 'ruan-agent-experiment[bot]')
     runs-on: [self-hosted, agent]
     outputs:
       issue: ${{ steps.ids.outputs.issue }}
