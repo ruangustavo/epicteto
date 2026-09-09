@@ -55,7 +55,7 @@ export async function loadConfig(): Promise<RunConfig> {
     agentHome: required("AGENT_HOME"),
     agentData: required("AGENT_DATA"),
     model: process.env.AGENT_MODEL ?? "openai-codex/gpt-5.5",
-    image: process.env.AGENT_IMAGE ?? "agent-runner:local",
+    image: process.env.AGENT_IMAGE ?? "epicteto-agent:local",
     uiGlobs: (process.env.UI_GLOBS ?? "").split(",").map((g) => g.trim()).filter(Boolean),
     attachToken: process.env.ATTACH_TOKEN || null,
     checks: (process.env.CHECKS ?? "").split(",").map((c) => c.trim()).filter(Boolean).length
