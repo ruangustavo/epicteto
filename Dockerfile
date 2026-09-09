@@ -11,7 +11,7 @@ RUN curl -fsSL https://bun.sh/install | bash \
  && ln -s /root/.bun/bin/bunx /usr/local/bin/bunx
 
 ARG PI_VERSION=0.85.1
-ARG AGENT_BROWSER_VERSION=0.36.0
+ARG AGENT_BROWSER_VERSION=0.37.1
 RUN npm i -g @earendil-works/pi-coding-agent@${PI_VERSION} agent-browser@${AGENT_BROWSER_VERSION}
 
 # Debian's chromium: Chrome for Testing has no linux/arm64 builds.

@@ -15,6 +15,10 @@ on:
         description: PR number (leave empty for an implement run)
         required: false
         default: ""
+      rerecord:
+        description: Only replay the verification scripts and re-upload the video
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -76,5 +80,6 @@ jobs:
           REVIEW_BODY: ${{ github.event.review.body }}
           UI_GLOBS: ${{ env.UI_GLOBS }}
           ATTACH_TOKEN: ${{ secrets.ATTACH_TOKEN }}
+          RERECORD: ${{ inputs.rerecord }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: "$AGENT_HOME/bin/agent-run"

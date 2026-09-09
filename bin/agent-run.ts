@@ -230,8 +230,30 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
     : finish("needs input: checks failed after review round", "agent:needs-input", { prUrl });
 }
 
+async function rerecord(cfg: RunConfig, prNumber: number) {
+  const prUrl = `https://github.com/${cfg.repo}/pull/${prNumber}`;
+  const pr = await review.fetchPullRequest(cfg, prNumber);
+  await gh.setLabels(cfg, [RUNNING], TERMINAL);
+  await git.ensureBareRepo(cfg, p.bareRepo);
+  await git.ensureWorktree(p.bareRepo, p.worktree, pr.headRef);
+  const issue = await gh.fetchIssue(cfg);
+  const verification = await verifyUi(issue, await git.changedFiles(p.worktree), prUrl);
+  const section = verificationMarkdown(verification);
+  const body = await gh.prBody(cfg, prNumber);
+  const closes = `Closes #${cfg.issueNumber}`;
+  const stripped = body.replace(/### Verification[\s\S]*?(?=Closes #)/, "");
+  await gh.updatePrBody(cfg, prNumber, stripped.replace(closes, `${section}\n\n${closes}`));
+  if (verification.url) await review.commentOnPr(cfg, prNumber, `Re-recorded the verification video:\n\n${verification.url}`);
+  return finish(verification.url ? "in review" : "needs input: re-record failed", verification.url ? "agent:in-review" : "agent:needs-input", {
+    prUrl,
+    detail: verification.failure ?? undefined,
+  });
+}
+
 try {
-  if (cfg.mode.kind === "review") {
+  if (cfg.mode.kind === "rerecord") {
+    await rerecord(cfg, cfg.mode.prNumber);
+  } else if (cfg.mode.kind === "review") {
     await reviewRound(cfg, cfg.mode.prNumber, cfg.mode.reviewBody);
   } else {
     await implement(cfg);

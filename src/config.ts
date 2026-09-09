@@ -1,4 +1,7 @@
-export type RunMode = { kind: "implement" } | { kind: "review"; prNumber: number; reviewBody: string };
+export type RunMode =
+  | { kind: "implement" }
+  | { kind: "review"; prNumber: number; reviewBody: string }
+  | { kind: "rerecord"; prNumber: number };
 
 export interface RunConfig {
   mode: RunMode;
@@ -29,7 +32,9 @@ export function loadConfig(): RunConfig {
   if (!owner || !name) throw new Error(`REPO must be owner/name, got ${repo}`);
   const pr = process.env.PR;
   const mode: RunMode = pr
-    ? { kind: "review", prNumber: Number(pr), reviewBody: process.env.REVIEW_BODY ?? "" }
+    ? process.env.RERECORD === "true"
+      ? { kind: "rerecord", prNumber: Number(pr) }
+      : { kind: "review", prNumber: Number(pr), reviewBody: process.env.REVIEW_BODY ?? "" }
     : { kind: "implement" };
   return {
     mode,

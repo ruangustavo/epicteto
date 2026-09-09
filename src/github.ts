@@ -68,3 +68,7 @@ export async function createPr(
 export async function updatePrBody(cfg: RunConfig, prNumber: number, body: string): Promise<void> {
   await $`gh pr edit ${prNumber} -R ${cfg.repo} --body ${body}`.quiet();
 }
+
+export async function prBody(cfg: RunConfig, prNumber: number): Promise<string> {
+  return (await $`gh pr view ${prNumber} -R ${cfg.repo} --json body --jq .body`.text()).trimEnd();
+}
