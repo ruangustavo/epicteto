@@ -50,7 +50,7 @@ export async function loadConfig(): Promise<RunConfig> {
     name,
     issueNumber: Number(required("ISSUE")),
     token: await resolveToken(repo),
-    appSlug: required("APP_SLUG"),
+    appSlug: await resolveAppSlug(),
     appId: required("APP_ID"),
     agentHome: required("AGENT_HOME"),
     agentData: required("AGENT_DATA"),
@@ -74,6 +74,12 @@ async function resolveToken(repo: string): Promise<string> {
   const token = await mintInstallationToken(appId, await Bun.file(keyPath).text(), repo);
   process.env.GH_TOKEN = token;
   return token;
+}
+
+async function resolveAppSlug(): Promise<string> {
+  if (process.env.APP_SLUG) return process.env.APP_SLUG;
+  const { fetchAppSlug } = await import("./app-token");
+  return fetchAppSlug(required("APP_ID"), await Bun.file(required("APP_PRIVATE_KEY_PATH")).text());
 }
 
 /** Translates a path under AGENT_DATA to the equivalent path on the Docker host. */

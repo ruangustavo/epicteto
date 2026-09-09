@@ -19,3 +19,11 @@ export function signAppJwt(appId: string, privateKeyPem: string): string {
   const sig = createSign("RSA-SHA256").update(unsigned).sign(privateKeyPem).toString("base64url");
   return `${unsigned}.${sig}`;
 }
+
+export async function fetchAppSlug(appId: string, privateKeyPem: string): Promise<string> {
+  const res = await fetch("https://api.github.com/app", {
+    headers: { Authorization: `Bearer ${signAppJwt(appId, privateKeyPem)}`, Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) throw new Error(`could not read App metadata (${res.status})`);
+  return ((await res.json()) as { slug: string }).slug;
+}
