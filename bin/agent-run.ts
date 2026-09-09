@@ -55,9 +55,9 @@ async function finish(
   await gh.setLabels(cfg, [label], [RUNNING, ...TERMINAL.filter((l) => l !== label)]);
 }
 
-async function reportFatal(err: unknown): Promise<never> {
-  const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
-  const message = err instanceof Error ? `${err.message}\n${stderr}` : String(err);
+async function reportFatal(err: Error): Promise<never> {
+  const stderr = err instanceof Bun.$.ShellError ? err.stderr.toString() : "";
+  const message = `${err.message}\n${stderr}`;
 
   log(`fatal: ${message}`);
   await finish("failed: orchestrator error", "agent:needs-input", {
@@ -331,10 +331,11 @@ async function implement(cfg: RunConfig) {
       detail: agentOutputDetails(outcome.output),
     });
 
-  if (result.questions)
-    return finish("needs input: the agent has questions", "agent:needs-input", {
-      detail: `### Questions\n${result.questions}`,
-    });
+  if (result.questions) {
+    const detail = `### Questions\n${result.questions}`;
+
+    return finish("needs input: the agent has questions", "agent:needs-input", { detail });
+  }
 
   await git.commitLeftovers(p.worktree, botIdentity(cfg));
 
@@ -554,5 +555,5 @@ try {
     await implement(cfg);
   }
 } catch (err) {
-  await reportFatal(err);
+  await reportFatal(err instanceof Error ? err : new Error(String(err)));
 }

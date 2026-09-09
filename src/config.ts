@@ -106,7 +106,7 @@ async function resolveToken(repo: string): Promise<string> {
   const appId = required("APP_ID");
   const keyPath = required("APP_PRIVATE_KEY_PATH");
   const { mintInstallationToken } = await import("./app-token");
-  const token = await mintInstallationToken(appId, await Bun.file(keyPath).text(), repo);
+  const token = await mintInstallationToken(appId, await Bun.file(keyPath).text(), { repo });
 
   process.env.GH_TOKEN = token;
 

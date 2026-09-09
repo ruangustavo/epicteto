@@ -2,6 +2,8 @@
 // Creates the GitHub App through GitHub's manifest flow: serves a form on localhost, you click
 // "Create GitHub App" once, and the callback saves APP_ID + private key under ./secrets/.
 // Usage: bun run scripts/create-app.ts <app-name> [--org <org>]
+import { appManifestConversionSchema, readJson } from "../src/github-api";
+
 const appName = process.argv[2];
 
 if (!appName) {
@@ -55,18 +57,7 @@ Bun.serve({
         method: "POST",
         headers: { Accept: "application/vnd.github+json" },
       });
-
-      if (!res.ok)
-        return new Response(`conversion failed: ${res.status} ${await res.text()}`, {
-          status: 500,
-        });
-
-      const app = (await res.json()) as {
-        id: number;
-        slug: string;
-        pem: string;
-        html_url: string;
-      };
+      const app = await readJson(res, appManifestConversionSchema, "App manifest conversion");
 
       await Bun.$`mkdir -p secrets && chmod 700 secrets`;
       await Bun.write("secrets/app-private-key.pem", app.pem);

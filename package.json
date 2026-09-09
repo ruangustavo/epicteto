@@ -8,6 +8,9 @@
     "fmt": "oxlint --fix; oxfmt",
     "check": "bun run typecheck && bun run lint && oxfmt --check"
   },
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
   "devDependencies": {
     "@oxlint/plugins": "1.82.0",
     "@stylistic/eslint-plugin": "^5.10.0",

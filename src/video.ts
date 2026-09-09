@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 import type { RunConfig } from "./config";
+import { assetSchema, readJson } from "./github-api";
 
 export function uiTouched(files: string[], globs: string[]): boolean {
   if (globs.length === 0) return false;
@@ -74,12 +75,7 @@ export async function uploadAttachment(cfg: RunConfig, filePath: string): Promis
     },
     body: Bun.file(filePath),
   });
+  const asset = await readJson(res, assetSchema, "attachment upload");
 
-  if (!res.ok) throw new Error(`attachment upload failed: ${res.status} ${await res.text()}`);
-
-  const json = (await res.json()) as { url?: string };
-
-  if (!json.url) throw new Error("attachment upload returned no url");
-
-  return json.url;
+  return asset.url;
 }

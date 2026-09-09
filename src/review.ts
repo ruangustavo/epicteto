@@ -141,7 +141,7 @@ export function parseReviewResult(markdown: string): ReviewResult | null {
   for (const m of markdown.matchAll(blockRe)) {
     replies.push({
       id: m[1],
-      status: m[2] as ThreadStatus,
+      status: m[2] === "addressed" ? "addressed" : "not-applicable",
       message: m[3].trim(),
     });
   }
