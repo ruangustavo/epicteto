@@ -1,6 +1,6 @@
 # Architecture
 
-Four pieces, each with one job.
+There are four pieces. Each one does one job.
 
 ```text
 ┌──────────────┐  event   ┌─────────────────────┐  job   ┌──────────────────────────┐
@@ -17,25 +17,27 @@ Four pieces, each with one job.
                                                           └──────────────────────────┘
 ```
 
-**GitHub** holds every piece of state you can see: labels, one status comment per issue edited in
-place, the PR, the review threads. It emits the events. A GitHub App you own is the agent's identity.
+GitHub holds all the state you can see: the labels, one status comment per issue that gets edited in
+place, the PR, the review threads. It also emits the events. A GitHub App you own is the agent's
+identity there.
 
-**The workflow** (`workflow/agent.yml`, copied into your repo) is the deterministic gate. It decides
-*whether* a run happens (label name, review state, sender login), *which issue* it belongs to, and
-*one run at a time per issue* (concurrency group). It carries no secrets: only `UI_GLOBS` and
-`CHECKS`, which are configuration, not credentials.
+The workflow (`workflow/agent.yml`, copied into your repo) is the gate. It decides whether a run
+happens at all (label name, review state, who sent the event), which issue the run belongs to, and
+that only one run per issue happens at a time. It carries no secrets. `UI_GLOBS` and `CHECKS` are
+configuration, and they are the only things in it.
 
-**The runner container** (`runner/Dockerfile`) hosts GitHub's Actions runner and the orchestrator,
-`bin/agent-run.ts`. On start it mints a runner registration token with the App's key and registers
-itself. Per job it mints a one-hour installation token. It owns git, the tokens, and the Docker
-socket. It is the only place with credentials.
+The runner container (`runner/Dockerfile`) hosts GitHub's Actions runner and the orchestrator,
+`bin/agent-run.ts`. When it starts it signs a JWT with the App's key, mints a registration token and
+registers itself. For each job it mints a one-hour installation token. It owns git, the tokens and
+the Docker socket. Nothing else has credentials.
 
-**The agent container** (`Dockerfile`) is where the model runs. It gets a worktree at `/work`, a
-scratch directory at `/state`, and pi's credential directory. It has no GitHub token. It talks to
-the orchestrator only through files: it reads `/state/prompt.md`, it writes `/state/result.md`.
+The agent container (`Dockerfile`) is where the model runs. It gets the worktree at `/work`, a
+scratch directory at `/state`, and pi's credential directory. It has no GitHub token. It talks to the
+orchestrator through files only: it reads `/state/prompt.md` and writes `/state/result.md`.
 
-The rule that holds it together: the model never touches GitHub, and the workflow never touches the
-model. The orchestrator translates GitHub state into prompts, and result files into GitHub actions.
+The rule behind the split: the model never touches GitHub, and the workflow never touches the model.
+The orchestrator sits in the middle and turns GitHub state into prompts and result files into
+GitHub actions.
 
 ## Implement flow
 
@@ -94,6 +96,7 @@ pi-home/                         pi's config dir for the agent: auth.json (Codex
 
 ## Labels as state
 
-`agent` is the trigger you add. The orchestrator moves the issue through `agent:running`,
-`agent:in-review`, `agent:needs-input`, and, when built, `agent:quota-paused`, `agent:done`,
-`agent:abandoned`. Labels are visible, filterable, and cheap to reset by hand when something goes wrong.
+`agent` is the label you add. The orchestrator then moves the issue through `agent:running`,
+`agent:in-review` and `agent:needs-input`. `agent:quota-paused`, `agent:done` and `agent:abandoned`
+exist but nothing sets them yet. Labels are easy to filter on and easy to reset by hand when
+something goes wrong, which is why state lives there and nowhere else.
