@@ -59,10 +59,10 @@ async function reportFatal(err: Error): Promise<never> {
   const stderr = err instanceof Bun.$.ShellError ? err.stderr.toString() : "";
   const message = `${err.message}\n${stderr}`;
 
+  const detail = `<details><summary>error</summary>\n\n\`\`\`\n${message.slice(-3000)}\n\`\`\`\n</details>`;
+
   log(`fatal: ${message}`);
-  await finish("failed: orchestrator error", "agent:needs-input", {
-    detail: `<details><summary>error</summary>\n\n\`\`\`\n${message.slice(-3000)}\n\`\`\`\n</details>`,
-  }).catch(() => {});
+  await finish("failed: orchestrator error", "agent:needs-input", { detail }).catch(() => {});
   process.exit(1);
 }
 
@@ -326,10 +326,11 @@ async function implement(cfg: RunConfig) {
 
   const result = parseResult(outcome.resultText ?? "");
 
-  if (!result)
-    return finish("needs input: result file is malformed", "agent:needs-input", {
-      detail: agentOutputDetails(outcome.output),
-    });
+  if (!result) {
+    const detail = agentOutputDetails(outcome.output);
+
+    return finish("needs input: result file is malformed", "agent:needs-input", { detail });
+  }
 
   if (result.questions) {
     const detail = `### Questions\n${result.questions}`;

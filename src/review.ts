@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { z } from "zod";
 import type { RunConfig } from "./config";
 
 export interface ReviewThread {
@@ -20,32 +21,26 @@ export interface PullRequestInfo {
   threads: ReviewThread[];
 }
 
-interface ThreadsResponse {
-  data: {
-    repository: {
-      pullRequest: {
-        headRefName: string;
-        headRefOid: string;
-        reviewThreads: {
-          nodes: {
-            id: string;
-            isResolved: boolean;
-            path: string;
-            line: number | null;
-            comments: {
-              nodes: {
-                databaseId: number;
-                author: { login: string } | null;
-                body: string;
-                diffHunk: string;
-              }[];
-            };
-          }[];
-        };
-      };
-    };
-  };
-}
+const commentNodeSchema = z.object({
+  databaseId: z.number(),
+  author: z.object({ login: z.string() }).nullable(),
+  body: z.string(),
+  diffHunk: z.string(),
+});
+const threadNodeSchema = z.object({
+  id: z.string(),
+  isResolved: z.boolean(),
+  path: z.string(),
+  line: z.number().nullable(),
+  comments: z.object({ nodes: z.array(commentNodeSchema) }),
+});
+const pullRequestNodeSchema = z.object({
+  headRefName: z.string(),
+  headRefOid: z.string(),
+  reviewThreads: z.object({ nodes: z.array(threadNodeSchema) }),
+});
+const repositorySchema = z.object({ pullRequest: pullRequestNodeSchema });
+const threadsResponseSchema = z.object({ data: z.object({ repository: repositorySchema }) });
 
 const THREADS_QUERY = `query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
@@ -54,8 +49,9 @@ const THREADS_QUERY = `query($o:String!,$r:String!,$n:Int!){
       comments(first:50){ nodes{ databaseId author{login} body diffHunk } } } } } } }`;
 
 export async function fetchPullRequest(cfg: RunConfig, prNumber: number): Promise<PullRequestInfo> {
-  const res: ThreadsResponse =
-    await $`gh api graphql -f query=${THREADS_QUERY} -F o=${cfg.owner} -F r=${cfg.name} -F n=${prNumber}`.json();
+  const res = threadsResponseSchema.parse(
+    await $`gh api graphql -f query=${THREADS_QUERY} -F o=${cfg.owner} -F r=${cfg.name} -F n=${prNumber}`.json(),
+  );
   const pr = res.data.repository.pullRequest;
 
   return {

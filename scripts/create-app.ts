@@ -69,9 +69,9 @@ Bun.serve({
       console.log(`\nNext: install it on your repo → ${app.html_url}/installations/new`);
       setTimeout(() => process.exit(0), 300);
 
-      return new Response(`App "${app.slug}" created. Back to the terminal.`, {
-        headers: { "content-type": "text/plain" },
-      });
+      const headers = { "content-type": "text/plain" };
+
+      return new Response(`App "${app.slug}" created. Back to the terminal.`, { headers });
     }
 
     return new Response("not found", { status: 404 });
