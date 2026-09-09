@@ -7,6 +7,7 @@ export interface ContainerMounts {
   bareRepo: string;
   state: string;
   piHome: string;
+  network?: string;
 }
 
 export function botIdentity(cfg: RunConfig) {
@@ -38,7 +39,8 @@ function dockerRun(cfg: RunConfig, mounts: ContainerMounts, extraEnv: Record<str
     GIT_COMMITTER_EMAIL: identity.email,
     ...extraEnv,
   }).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return $`docker run --rm ${env} \
+  const network = mounts.network ? ["--network", mounts.network] : [];
+  return $`docker run --rm ${env} ${network} \
     -v ${mounts.worktree}:/work -v ${mounts.bareRepo}:${mounts.bareRepo} \
     -v ${mounts.state}:/state -v ${mounts.piHome}:/root/.pi/agent \
     -w /work ${cfg.image} ${command}`;
@@ -50,12 +52,12 @@ export interface AgentRun {
   quotaExhausted: boolean;
 }
 
-export async function runAgent(cfg: RunConfig, mounts: ContainerMounts, prompt: string): Promise<AgentRun> {
-  await Bun.write(`${mounts.state}/prompt.md`, prompt);
+export async function runAgent(cfg: RunConfig, mounts: ContainerMounts, prompt: string, promptFile = "prompt.md"): Promise<AgentRun> {
+  await Bun.write(`${mounts.state}/${promptFile}`, prompt);
   const proc = await dockerRun(cfg, mounts, {}, [
     "sh",
     "-c",
-    `pi -p --model "$AGENT_MODEL" --session /state/session.jsonl --no-extensions -- "$(cat /state/prompt.md)"`,
+    `pi -p --model "$AGENT_MODEL" --session /state/session.jsonl --no-extensions -- "$(cat /state/${promptFile})"`,
   ])
     .env({ ...process.env, AGENT_MODEL: cfg.model })
     .nothrow();
@@ -90,4 +92,15 @@ export async function runChecks(cfg: RunConfig, mounts: ContainerMounts): Promis
   }
   await Bun.write(`${mounts.state}/checks.log`, results.map((r) => `### ${r.name} (${r.ok ? "ok" : "FAILED"})\n${r.output}`).join("\n\n"));
   return results;
+}
+
+export interface ShellResult {
+  exitCode: number;
+  output: string;
+}
+
+/** Runs a shell snippet inside the agent container (app boot, script replay, recording). */
+export async function runShell(cfg: RunConfig, mounts: ContainerMounts, script: string, timeoutSec = 600): Promise<ShellResult> {
+  const proc = await dockerRun(cfg, mounts, {}, ["timeout", String(timeoutSec), "sh", "-c", script]).nothrow();
+  return { exitCode: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
 }

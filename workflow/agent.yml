@@ -19,8 +19,8 @@ on:
 permissions: {}
 
 env:
-  AGENT_BOT: ruan-agent-experiment[bot]
-  AGENT_OWNER: ruangustavo
+  # Paths that count as UI: a diff touching them gets a verification video.
+  UI_GLOBS: "apps/web/**"
 
 jobs:
   resolve:
@@ -74,5 +74,7 @@ jobs:
           ISSUE: ${{ needs.resolve.outputs.issue }}
           PR: ${{ needs.resolve.outputs.pr }}
           REVIEW_BODY: ${{ github.event.review.body }}
+          UI_GLOBS: ${{ env.UI_GLOBS }}
+          ATTACH_TOKEN: ${{ secrets.ATTACH_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: "$AGENT_HOME/bin/agent-run"

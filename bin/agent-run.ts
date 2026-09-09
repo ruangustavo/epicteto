@@ -1,17 +1,19 @@
 #!/usr/bin/env bun
-import { mkdirSync } from "node:fs";
-import { botIdentity, renderPrompt, runAgent, runChecks, type CheckResult, type ContainerMounts } from "../src/agent";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { botIdentity, renderPrompt, runAgent, runChecks, runShell, type CheckResult, type ContainerMounts } from "../src/agent";
 import { loadConfig, paths, type RunConfig } from "../src/config";
 import * as git from "../src/git";
 import * as gh from "../src/github";
 import { checksTable, parseResult, prBody, statusComment } from "../src/report";
 import * as review from "../src/review";
+import { composeDown, composeUp, uiTouched, uploadAttachment } from "../src/video";
 
 const cfg = loadConfig();
 const p = paths(cfg);
 const runUrl = process.env.RUN_URL;
-mkdirSync(p.state, { recursive: true });
-mkdirSync(p.piHome, { recursive: true });
+mkdirSync(`${p.state}/videos`, { recursive: true });
+mkdirSync(`${p.piHome}/skills`, { recursive: true });
+await Bun.$`cp -R ${cfg.agentHome}/skills/verify-ui ${p.piHome}/skills/`.quiet();
 
 const log = (msg: string) => console.log(`[agent-run] ${msg}`);
 let checks: CheckResult[] = [];
@@ -47,6 +49,78 @@ async function runAgentAndChecks(prompt: string, resultFileName: string): Promis
   return { output: run.output, resultText: await file.text() };
 }
 
+interface Verification {
+  url: string | null;
+  scenario: string | null;
+  failure: string | null;
+}
+
+function renderTemplate(name: string, vars: Record<string, string>): Promise<string> {
+  return Bun.file(`${cfg.agentHome}/templates/${name}`)
+    .text()
+    .then((t) => Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{{${k}}}`, v), t));
+}
+
+async function recordRound(mountsNet: ContainerMounts, round: number) {
+  const script = [
+    "set -e",
+    "sh /state/boot.sh",
+    'URL="$(cat /state/app-url)"',
+    "mkdir -p /state/videos",
+    'agent-browser open "$URL"',
+    `agent-browser record start /state/videos/round-${round}.webm`,
+    "set +e",
+    "sh /state/verify.sh; rc=$?",
+    "agent-browser record stop",
+    "agent-browser close",
+    "exit $rc",
+  ].join("\n");
+  return runShell(cfg, mountsNet, script, 600);
+}
+
+async function verifyUi(issue: gh.Issue, files: string[], prUrl: string): Promise<Verification> {
+  const none: Verification = { url: null, scenario: null, failure: null };
+  if (!uiTouched(files, cfg.uiGlobs)) return none;
+  if (!cfg.attachToken) return { ...none, failure: "UI changed but ATTACH_TOKEN is not configured; no video." };
+
+  await gh.upsertStatusComment(cfg, statusComment({ phase: "running: recording verification", runUrl, checks, prUrl }));
+  const stack = await composeUp(cfg, p.worktree, p.state);
+  const mountsNet: ContainerMounts = { ...mounts, network: stack?.network };
+  const round = readdirSync(`${p.state}/videos`, { withFileTypes: true }).length + 1;
+  const fileList = files.map((f) => `- ${f}`).join("\n");
+  try {
+    if (!existsSync(`${p.state}/boot.sh`) || !existsSync(`${p.state}/verify.sh`)) {
+      const prompt = await renderTemplate("verify-prompt.md", { issue: String(issue.number), title: issue.title, body: issue.body ?? "", files: fileList });
+      const run = await runAgent(cfg, mountsNet, prompt, "verify-prompt.md");
+      log(`verify agent exited ${run.exitCode}`);
+    }
+    let rec = await recordRound(mountsNet, round);
+    if (rec.exitCode !== 0) {
+      log(`replay failed (${rec.exitCode}); asking the agent to repair`);
+      const prompt = await renderTemplate("verify-repair-prompt.md", { exit_code: String(rec.exitCode), output: rec.output.slice(-4000), files: fileList });
+      await runAgent(cfg, mountsNet, prompt, "verify-repair-prompt.md");
+      rec = await recordRound(mountsNet, round);
+    }
+    await Bun.write(`${p.state}/record-round-${round}.log`, rec.output);
+    if (rec.exitCode !== 0) {
+      return { ...none, failure: `Verification replay failed (exit ${rec.exitCode}).\n\n<details><summary>output</summary>\n\n\`\`\`\n${rec.output.slice(-3000)}\n\`\`\`\n</details>` };
+    }
+    const url = await uploadAttachment(cfg, `${p.state}/videos/round-${round}.webm`);
+    const scenarioFile = Bun.file(`${p.state}/verify-result.md`);
+    const scenario = (await scenarioFile.exists()) ? ((await scenarioFile.text()).match(/## Scenario\s*\n([\s\S]*?)(?=\n## |$)/)?.[1]?.trim() ?? null) : null;
+    log(`video uploaded: ${url}`);
+    return { url, scenario, failure: null };
+  } finally {
+    await composeDown(stack);
+  }
+}
+
+function verificationMarkdown(v: Verification): string {
+  if (v.url) return ["### Verification", v.scenario ?? "", "", v.url].join("\n");
+  if (v.failure) return `### Verification\n${v.failure}`;
+  return "";
+}
+
 async function implement(cfg: RunConfig) {
   const issue = await gh.fetchIssue(cfg);
   const comments = await gh.fetchIssueComments(cfg);
@@ -76,12 +150,18 @@ async function implement(cfg: RunConfig) {
   log(`checks ${green ? "green" : "red"}: ${checks.map((c) => `${c.name}=${c.ok}`).join(" ")}`);
 
   await git.pushBranch(cfg, p.worktree, branch);
-  const body = prBody(issue.number, result, checks);
+  let body = prBody(issue.number, result, checks);
   const existing = await gh.findOpenPr(cfg, branch);
-  const prUrl = existing
-    ? (await gh.updatePrBody(cfg, existing, body), `https://github.com/${cfg.repo}/pull/${existing}`)
-    : await gh.createPr(cfg, { branch, title: issue.title, body, draft: !green });
+  const prNumber = existing ?? Number((await gh.createPr(cfg, { branch, title: issue.title, body, draft: !green })).split("/").pop());
+  const prUrl = `https://github.com/${cfg.repo}/pull/${prNumber}`;
   log(`PR ${prUrl}`);
+
+  if (green) {
+    const verification = await verifyUi(issue, await git.changedFiles(p.worktree), prUrl);
+    const section = verificationMarkdown(verification);
+    if (section) body = body.replace(`Closes #${issue.number}`, `${section}\n\nCloses #${issue.number}`);
+  }
+  await gh.updatePrBody(cfg, prNumber, body);
 
   return green
     ? finish("in review", "agent:in-review", { prUrl })
@@ -119,6 +199,9 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
 
   await git.pushBranch(cfg, p.worktree, pr.headRef);
   const sha = await git.headSha(p.worktree);
+  const verification = green
+    ? await verifyUi(await gh.fetchIssue(cfg), await git.changedFiles(p.worktree), prUrl)
+    : { url: null, scenario: null, failure: null };
 
   for (const thread of pr.threads) {
     const reply = result.replies.find((r) => r.id === thread.id);
@@ -136,6 +219,8 @@ async function reviewRound(cfg: RunConfig, prNumber: number, reviewBody: string)
     "",
     checksTable(checks),
     unanswered.length ? `\n${unanswered.length} thread(s) were not answered by the agent and remain open.` : "",
+    "",
+    verificationMarkdown(verification),
   ].join("\n");
   await review.commentOnPr(cfg, prNumber, summary);
 

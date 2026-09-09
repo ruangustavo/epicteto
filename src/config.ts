@@ -13,6 +13,8 @@ export interface RunConfig {
   agentData: string;
   model: string;
   image: string;
+  uiGlobs: string[];
+  attachToken: string | null;
 }
 
 function required(name: string): string {
@@ -42,6 +44,8 @@ export function loadConfig(): RunConfig {
     agentData: required("AGENT_DATA"),
     model: process.env.AGENT_MODEL ?? "openai-codex/gpt-5.5",
     image: process.env.AGENT_IMAGE ?? "agent-runner:local",
+    uiGlobs: (process.env.UI_GLOBS ?? "").split(",").map((g) => g.trim()).filter(Boolean),
+    attachToken: process.env.ATTACH_TOKEN || null,
   };
 }
 
